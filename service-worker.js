@@ -1,4 +1,4 @@
-const CACHE_NAME = 'doc-scanner-v4';
+const CACHE_NAME = 'doc-scanner-v5';
 const APP_SHELL = [
   './',
   './index.html',

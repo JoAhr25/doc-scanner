@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b0f19">
+<meta name="description" content="Free offline document scanner with OCR and Google Sheets sync">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Doc Scanner</title>
+<script src="https://unpkg.com/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0b0f19; color: #e2e8f0;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#app { flex: 1; display: flex; flex-direction: column; max-width: 600px; width: 100%; margin: 0 auto; position: relative; }
+
+header {
+  padding: 1rem; text-align: center;
+  background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+  border-bottom: 1px solid #1e293b; flex-shrink: 0;
+}
+header h1 { font-size: 1.2rem; color: #38bdf8; }
+header p { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
+
+#installBtn {
+  display: none; margin: 0.5rem auto 0;
+  background: #22c55e; color: #fff; border: none;
+  padding: 8px 20px; border-radius: 20px;
+  font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
+
+main { flex: 1; overflow-y: auto; padding: 1rem; }
+
+.config {
+  background: #1e293b; border-radius: 12px;
+  padding: 0.875rem; margin-bottom: 0.75rem; border: 1px solid #334155;
+}
+.config label { display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.config input {
+  width: 100%; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid #475569; background: #0f172a; color: #e2e8f0;
+  font-size: 0.85rem; font-family: monospace;
+}
+.config .hint { font-size: 0.7rem; color: #64748b; margin-top: 6px; line-height: 1.4; }
+
+.queue-badge {
+  background: #1e293b; border-radius: 12px;
+  padding: 0.75rem 1rem; margin-bottom: 0.75rem;
+  border: 1px solid #334155; display: none;
+  align-items: center; justify-content: space-between;
+}
+.queue-badge.show { display: flex; }
+.queue-badge .count {
+  background: #ef4444; color: #fff; font-size: 0.75rem; font-weight: 700;
+  width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.scanner {
+  background: #1e293b; border-radius: 16px;
+  border: 2px dashed #334155; overflow: hidden;
+  position: relative; aspect-ratio: 3/4;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.3s; margin-bottom: 0.75rem;
+}
+.scanner.active { border-color: #38bdf8; border-style: solid; }
+
+#video { width: 100%; height: 100%; object-fit: cover; display: none; transform: scaleX(-1); }
+#preview { width: 100%; height: 100%; object-fit: contain; display: none; background: #0f172a; }
+.drop-zone {
+  padding: 2rem; text-align: center; cursor: pointer;
+  width: 100%; height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.drop-zone .icon { font-size: 2.5rem; margin-bottom: 0.5rem; opacity: 0.7; }
+.drop-zone p { color: #94a3b8; font-size: 0.9rem; }
+.drop-zone .hint { color: #64748b; font-size: 0.75rem; margin-top: 6px; }
+.drop-zone input { display: none; }
+
+.controls {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 0.6rem; margin-bottom: 0.75rem;
+}
+.btn {
+  padding: 14px; border: none; border-radius: 12px;
+  font-size: 0.9rem; font-weight: 600; cursor: pointer;
+  transition: all 0.15s; text-align: center;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.btn:active { transform: scale(0.96); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: #38bdf8; color: #0f172a; grid-column: 1 / -1; }
+.btn-secondary { background: #334155; color: #e2e8f0; }
+.btn-accent { background: #22c55e; color: #fff; }
+.btn-warn { background: #ef4444; color: #fff; }
+
+.progress-box {
+  background: #1e293b; border-radius: 12px;
+  padding: 1rem; margin-bottom: 0.75rem;
+  border: 1px solid #334155; display: none;
+}
+.progress-box.show { display: block; }
+.progress-bar { height: 6px; background: #334155; border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.progress-fill { height: 100%; width: 0%; background: #38bdf8; border-radius: 3px; transition: width 0.3s; }
+.progress-meta { display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.75rem; color: #94a3b8; }
+
+.result {
+  background: #1e293b; border-radius: 12px;
+  padding: 1rem; border: 1px solid #334155;
+  margin-bottom: 0.75rem; display: none;
+}
+.result.show { display: block; }
+.result h3 { font-size: 0.8rem; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.result pre {
+  background: #0f172a; padding: 10px; border-radius: 8px;
+  font-size: 0.8rem; color: #94a3b8; overflow-x: auto;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 180px; overflow-y: auto; line-height: 1.5;
+}
+
+.status {
+  padding: 12px; border-radius: 10px;
+  font-size: 0.85rem; text-align: center;
+  margin-bottom: 0.75rem; display: none;
+}
+.status.success { background: #064e3b; color: #6ee7b7; display: block; }
+.status.error { background: #450a0a; color: #fca5a5; display: block; }
+.status.loading { background: #1e3a5f; color: #93c5fd; display: block; }
+
+.spinner {
+  display: inline-block; width: 16px; height: 16px;
+  border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; animation: spin 1s linear infinite;
+  margin-right: 6px; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#canvas { display: none; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <h1>📄 Doc Scanner</h1>
+    <p>OCR → Google Sheets (Offline Capable)</p>
+    <button id="installBtn" onclick="installPWA()">⬇ Install App</button>
+  </header>
+
+  <main>
+    <div class="config">
+      <label>Google Apps Script URL</label>
+      <input type="text" id="scriptUrl" placeholder="Paste your deployed Apps Script URL">
+      <div class="hint">Required for auto-save. The app works offline and syncs when you reconnect.</div>
+    </div>
+
+    <div class="queue-badge" id="queueBadge">
+      <span>⏳ <span id="queueCount">0</span> scans queued</span>
+      <button class="btn btn-accent" style="padding:6px 12px; font-size:0.75rem;" onclick="syncQueue()">Sync Now</button>
+    </div>
+
+    <div class="scanner" id="scanner">
+      <video id="video" autoplay playsinline></video>
+      <img id="preview" alt="Preview">
+      <div class="drop-zone" id="dropZone">
+        <div class="icon">📁</div>
+        <p>Tap to choose image</p>
+        <div class="hint">or use camera below</div>
+        <input type="file" id="fileInput" accept="image/*">
+      </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <div class="controls" id="controls">
+      <button class="btn btn-primary" id="btnCamera" onclick="startCamera()">📷 Open Camera</button>
+      <button class="btn btn-primary" id="btnCapture" onclick="capture()" style="display:none;">⚡ Capture & Scan</button>
+      <button class="btn btn-secondary" id="btnRetake" onclick="retake()" style="display:none;">🔄 Retake</button>
+      <button class="btn btn-secondary" id="btnGallery" onclick="document.getElementById('fileInput').click()">🖼 Gallery</button>
+    </div>
+
+    <div class="progress-box" id="progressBox">
+      <div style="font-weight:600; font-size:0.9rem;">Reading document...</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-meta">
+        <span id="progressText">Initializing...</span>
+        <span id="progressPct">0%</span>
+      </div>
+    </div>
+
+    <div class="result" id="result">
+      <h3>Extracted Text</h3>
+      <pre id="extractedText"></pre>
+    </div>
+
+    <div class="status" id="status"></div>
+  </main>
+</div>
+
+<script>
+// ── PWA Install ──
+let deferredPrompt;
+const installBtn = document.getElementById('installBtn');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.style.display = 'inline-block';
+});
+
+async function installPWA() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') installBtn.style.display = 'none';
+  deferredPrompt = null;
+}
+
+window.addEventListener('appinstalled', () => {
+  installBtn.style.display = 'none';
+  deferredPrompt = null;
+});
+
+// ── Register Service Worker ──
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js').catch(console.error);
+}
+
+// ── IndexedDB Queue ──
+const DB_NAME = 'ScannerQueue', DB_VERSION = 1, STORE_NAME = 'pending';
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+async function queueScan(text) {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const store = tx.objectStore(STORE_NAME);
+  await new Promise((res, rej) => { const r = store.add({ text, date: new Date().toISOString(), retries: 0 }); r.onsuccess = res; r.onerror = rej; });
+  updateQueueBadge();
+  showStatus('📴 Offline. Scan saved locally. Will sync when online.', 'error');
+}
+
+async function getQueueCount() {
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, 'readonly');
+  const store = tx.objectStore(STORE_NAME);
+  return new Promise((res, rej) => { const r = store.count(); r.onsuccess = e => res(e.target.result); r.onerror = rej; });
+}
+
+async function updateQueueBadge() {
+  const count = await getQueueCount();
+  document.getElementById('queueBadge').classList.toggle('show', count > 0);
+  document.getElementById('queueCount').textContent = count;
+}
+
+async function syncQueue() {
+  const url = document.getElementById('scriptUrl').value.trim();
+  if (!url) { showStatus('⚠️ Set your Apps Script URL first', 'error'); return; }
+  const db = await openDB();
+  const tx = db.transaction(STORE_NAME, 'readonly');
+  const items = await new Promise((res, rej) => { const r = tx.objectStore(STORE_NAME).getAll(); r.onsuccess = e => res(e.target.result); r.onerror = rej; });
+  if (!items.length) { showStatus('No pending scans', 'success'); return; }
+  showStatus('<span class="spinner"></span>Syncing ' + items.length + ' scans...', 'loading');
+  let success = 0;
+  for (const item of items) {
+    try {
+      await sendToScript(item.text, url);
+      const delTx = db.transaction(STORE_NAME, 'readwrite');
+      await new Promise((res, rej) => { const r = delTx.objectStore(STORE_NAME).delete(item.id); r.onsuccess = res; r.onerror = rej; });
+      success++;
+    } catch (e) { console.error('Sync failed', item.id, e); }
+  }
+  updateQueueBadge();
+  showStatus('✅ Synced ' + success + '/' + items.length + ' scans', 'success');
+}
+
+window.addEventListener('online', () => { updateQueueBadge().then(() => syncQueue()); });
+
+// ── DOM ──
+const video = document.getElementById('video');
+const preview = document.getElementById('preview');
+const canvas = document.getElementById('canvas');
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const scanner = document.getElementById('scanner');
+const progressBox = document.getElementById('progressBox');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const progressPct = document.getElementById('progressPct');
+const result = document.getElementById('result');
+const extractedText = document.getElementById('extractedText');
+const status = document.getElementById('status');
+let stream = null, currentImage = null;
+
+// ── Camera ──
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 } } });
+    video.srcObject = stream; video.style.display = 'block';
+    dropZone.style.display = 'none'; preview.style.display = 'none';
+    toggleBtn('btnCamera', false); toggleBtn('btnCapture', true); toggleBtn('btnGallery', false);
+    scanner.classList.add('active');
+    if (navigator.vibrate) navigator.vibrate(50);
+  } catch (err) { showStatus('❌ Camera access denied. Use Gallery.', 'error'); }
+}
+
+function capture() {
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0);
+  stopCamera(); processCanvas();
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.style.display = 'none';
+  toggleBtn('btnCapture', false); toggleBtn('btnRetake', true); toggleBtn('btnGallery', false);
+  scanner.classList.remove('active');
+}
+
+// ── Gallery ──
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.background = '#334155'; });
+dropZone.addEventListener('dragleave', () => { dropZone.style.background = ''; });
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.background = ''; if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+function handleFile(file) {
+  if (!file.type.startsWith('image/')) { showStatus('Please select an image', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.width; canvas.height = img.height;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      currentImage = canvas;
+      preview.src = canvas.toDataURL('image/jpeg', 0.92);
+      preview.style.display = 'block'; dropZone.style.display = 'none';
+      toggleBtn('btnCamera', false); toggleBtn('btnRetake', true); toggleBtn('btnGallery', false);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function processCanvas() {
+  preview.src = canvas.toDataURL('image/jpeg', 0.92);
+  preview.style.display = 'block'; currentImage = canvas;
+  runOCR();
+}
+
+function retake() {
+  preview.style.display = 'none'; result.classList.remove('show');
+  dropZone.style.display = 'flex';
+  toggleBtn('btnCamera', true); toggleBtn('btnRetake', false); toggleBtn('btnGallery', true);
+  hideStatus(); progressBox.classList.remove('show'); currentImage = null;
+}
+
+// ── OCR ──
+async function runOCR() {
+  if (!currentImage) return;
+  const scriptUrl = document.getElementById('scriptUrl').value.trim();
+  if (!scriptUrl) { showStatus('⚠️ Paste your Apps Script URL first', 'error'); return; }
+  progressBox.classList.add('show'); toggleBtn('btnRetake', false); hideStatus();
+  try {
+    const { data: { text } } = await Tesseract.recognize(currentImage, 'eng', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          const p = Math.round(m.progress * 100);
+          progressFill.style.width = p + '%'; progressPct.textContent = p + '%'; progressText.textContent = 'Reading text...';
+        } else { progressText.textContent = m.status; }
+      }
+    });
+    progressBox.classList.remove('show');
+    extractedText.textContent = text; result.classList.add('show');
+    if (navigator.vibrate) navigator.vibrate([50, 50, 50]);
+    await saveToSheets(text, scriptUrl);
+  } catch (err) {
+    progressBox.classList.remove('show');
+    showStatus('❌ OCR failed: ' + err.message, 'error'); toggleBtn('btnRetake', true);
+  }
+}
+
+// ── Save / Sync ──
+async function saveToSheets(text, url) {
+  showStatus('<span class="spinner"></span>Saving to Google Sheets...', 'loading');
+  try {
+    await sendToScript(text, url);
+    showStatus('✅ Saved to Google Sheets!', 'success');
+    if (navigator.vibrate) navigator.vibrate(100);
+  } catch (err) {
+    if (!navigator.onLine) { await queueScan(text); }
+    else { showStatus('❌ Save failed: ' + err.message, 'error'); toggleBtn('btnRetake', true); }
+  }
+}
+
+function sendToScript(text, url) {
+  const params = new URLSearchParams();
+  params.append('text', text);
+  params.append('date', new Date().toLocaleString());
+  return fetch(url, { method: 'POST', body: params }).then(async res => {
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Save failed');
+    return data;
+  });
+}
+
+// ── UI Helpers ──
+function toggleBtn(id, show) { document.getElementById(id).style.display = show ? 'flex' : 'none'; }
+function showStatus(msg, type) { status.innerHTML = msg; status.className = 'status ' + type; }
+function hideStatus() { status.className = 'status'; status.style.display = 'none'; }
+
+updateQueueBadge();
+</script>
+
+</body>
+</html>

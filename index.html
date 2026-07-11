@@ -4,11 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#0b0f19">
-<meta name="description" content="Free offline document scanner with OCR and Google Sheets sync">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Doc Scanner</title>
 <script src="https://unpkg.com/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
 <style>
@@ -19,8 +17,7 @@ body {
   background: #0b0f19; color: #e2e8f0;
   display: flex; flex-direction: column; overflow: hidden;
 }
-#app { flex: 1; display: flex; flex-direction: column; max-width: 600px; width: 100%; margin: 0 auto; position: relative; }
-
+#app { flex: 1; display: flex; flex-direction: column; max-width: 600px; width: 100%; margin: 0 auto; }
 header {
   padding: 1rem; text-align: center;
   background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
@@ -28,15 +25,6 @@ header {
 }
 header h1 { font-size: 1.2rem; color: #38bdf8; }
 header p { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
-
-#installBtn {
-  display: none; margin: 0.5rem auto 0;
-  background: #22c55e; color: #fff; border: none;
-  padding: 8px 20px; border-radius: 20px;
-  font-size: 0.85rem; font-weight: 600; cursor: pointer;
-  animation: pulse 2s infinite;
-}
-@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05)} }
 
 main { flex: 1; overflow-y: auto; padding: 1rem; }
 
@@ -51,19 +39,6 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
   font-size: 0.85rem; font-family: monospace;
 }
 .config .hint { font-size: 0.7rem; color: #64748b; margin-top: 6px; line-height: 1.4; }
-
-.queue-badge {
-  background: #1e293b; border-radius: 12px;
-  padding: 0.75rem 1rem; margin-bottom: 0.75rem;
-  border: 1px solid #334155; display: none;
-  align-items: center; justify-content: space-between;
-}
-.queue-badge.show { display: flex; }
-.queue-badge .count {
-  background: #ef4444; color: #fff; font-size: 0.75rem; font-weight: 700;
-  width: 20px; height: 20px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-}
 
 .scanner {
   background: #1e293b; border-radius: 16px;
@@ -87,21 +62,21 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
 .drop-zone input { display: none; }
 
 .controls {
-  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  display: grid; grid-template-columns: 1fr 1fr;
   gap: 0.6rem; margin-bottom: 0.75rem;
 }
 .btn {
-  padding: 12px 4px; border: none; border-radius: 10px;
-  font-size: 0.8rem; font-weight: 600; cursor: pointer;
+  padding: 14px 4px; border: none; border-radius: 10px;
+  font-size: 0.85rem; font-weight: 600; cursor: pointer;
   transition: all 0.15s; text-align: center;
   display: flex; align-items: center; justify-content: center; gap: 4px;
 }
 .btn:active { transform: scale(0.96); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-primary { background: #38bdf8; color: #0f172a; grid-column: 1 / -1; }
-.btn-secondary { background: #334155; color: #e2e8f0; }
+.btn-primary { background: #38bdf8; color: #0f172a; }
 .btn-accent { background: #22c55e; color: #fff; }
 .btn-warn { background: #ef4444; color: #fff; }
+.btn-secondary { background: #334155; color: #e2e8f0; }
 
 .progress-box {
   background: #1e293b; border-radius: 12px;
@@ -145,41 +120,21 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 #canvas, #procCanvas { display: none; }
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
-
-.rotate-hint {
-  background: #451a03; color: #fdba74; border: 1px solid #9a3412;
-  border-radius: 8px; padding: 8px 12px; font-size: 0.8rem;
-  margin-bottom: 0.75rem; display: none; text-align: center;
-}
-.rotate-hint.show { display: block; }
 </style>
 </head>
 <body>
 
 <div id="app">
   <header>
-    <h1>📄 Doc Scanner</h1>
-    <p>OCR → Google Sheets (Offline Capable)</p>
-    <button id="installBtn" onclick="installPWA()">⬇ Install App</button>
+    <h1>📄 Doc Scanner v2.0</h1>
+    <p>OCR → Google Sheets</p>
   </header>
 
   <main>
     <div class="config">
       <label>Google Apps Script URL</label>
       <input type="text" id="scriptUrl" placeholder="Paste your deployed Apps Script URL">
-      <div class="hint">Required for auto-save. The app works offline and syncs when you reconnect.</div>
-    </div>
-
-    <div class="rotate-hint" id="rotateHint">
-      ⚠️ Document may be rotated. Try rotating your phone or the image for better results.
-    </div>
-
-    <div class="queue-badge" id="queueBadge">
-      <span>⏳ <span id="queueCount">0</span> scans queued</span>
-      <button class="btn btn-accent" style="padding:6px 12px; font-size:0.75rem;" onclick="syncQueue()">Sync Now</button>
+      <div class="hint">Paste the URL from your Google Apps Script deployment.</div>
     </div>
 
     <div class="scanner" id="scanner">
@@ -197,12 +152,12 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
     <canvas id="procCanvas"></canvas>
 
     <div class="controls" id="controls">
-      <button class="btn btn-primary" id="btnCamera" onclick="startCamera()">📷 Camera</button>
-      <button class="btn btn-primary" id="btnCapture" onclick="capture()" style="display:none;">⚡ Capture</button>
+      <button class="btn btn-primary" id="btnCamera" onclick="startCamera()" style="grid-column: 1 / -1;">📷 Open Camera</button>
+      <button class="btn btn-primary" id="btnCapture" onclick="capture()" style="display:none; grid-column: 1 / -1;">⚡ Capture</button>
       <button class="btn btn-secondary" id="btnRetake" onclick="retake()" style="display:none;">🔄 Retake</button>
       <button class="btn btn-secondary" id="btnGallery" onclick="document.getElementById('fileInput').click()">🖼 Gallery</button>
-      <button class="btn btn-secondary" id="btnRotate" onclick="rotateImage()" style="display:none;">↻ Rotate</button>
-      <button class="btn btn-accent" id="btnScan" onclick="runOCR()" style="display:none;">🔍 Read Text</button>
+      <button class="btn btn-warn" id="btnRotate" onclick="rotateImage()" style="display:none;">↻ Rotate</button>
+      <button class="btn btn-accent" id="btnScan" onclick="runOCR()" style="display:none;">🔍 Scan Text</button>
     </div>
 
     <div class="progress-box" id="progressBox">
@@ -224,91 +179,10 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
 </div>
 
 <script>
-// ── PWA Install ──
-let deferredPrompt;
-const installBtn = document.getElementById('installBtn');
-
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  installBtn.style.display = 'inline-block';
-});
-
-async function installPWA() {
-  if (!deferredPrompt) return;
-  deferredPrompt.prompt();
-  const { outcome } = await deferredPrompt.userChoice;
-  if (outcome === 'accepted') installBtn.style.display = 'none';
-  deferredPrompt = null;
-}
-
-window.addEventListener('appinstalled', () => {
-  installBtn.style.display = 'none';
-  deferredPrompt = null;
-});
-
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('service-worker.js').catch(console.error);
+  navigator.serviceWorker.register('service-worker.js').catch(err => alert('SW error: ' + err));
 }
 
-// ── IndexedDB Queue ──
-const DB_NAME = 'ScannerQueue', DB_VERSION = 1, STORE_NAME = 'pending';
-
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
-    req.onsuccess = e => resolve(e.target.result);
-    req.onerror = e => reject(e.target.error);
-  });
-}
-
-async function queueScan(text) {
-  const db = await openDB();
-  const tx = db.transaction(STORE_NAME, 'readwrite');
-  const store = tx.objectStore(STORE_NAME);
-  await new Promise((res, rej) => { const r = store.add({ text, date: new Date().toISOString(), retries: 0 }); r.onsuccess = res; r.onerror = rej; });
-  updateQueueBadge();
-  showStatus('📴 Offline. Scan saved locally. Will sync when online.', 'error');
-}
-
-async function getQueueCount() {
-  const db = await openDB();
-  const tx = db.transaction(STORE_NAME, 'readonly');
-  const store = tx.objectStore(STORE_NAME);
-  return new Promise((res, rej) => { const r = store.count(); r.onsuccess = e => res(e.target.result); r.onerror = rej; });
-}
-
-async function updateQueueBadge() {
-  const count = await getQueueCount();
-  document.getElementById('queueBadge').classList.toggle('show', count > 0);
-  document.getElementById('queueCount').textContent = count;
-}
-
-async function syncQueue() {
-  const url = document.getElementById('scriptUrl').value.trim();
-  if (!url) { showStatus('⚠️ Set your Apps Script URL first', 'error'); return; }
-  const db = await openDB();
-  const tx = db.transaction(STORE_NAME, 'readonly');
-  const items = await new Promise((res, rej) => { const r = tx.objectStore(STORE_NAME).getAll(); r.onsuccess = e => res(e.target.result); r.onerror = rej; });
-  if (!items.length) { showStatus('No pending scans', 'success'); return; }
-  showStatus('<span class="spinner"></span>Syncing ' + items.length + ' scans...', 'loading');
-  let success = 0;
-  for (const item of items) {
-    try {
-      await sendToScript(item.text, url);
-      const delTx = db.transaction(STORE_NAME, 'readwrite');
-      await new Promise((res, rej) => { const r = delTx.objectStore(STORE_NAME).delete(item.id); r.onsuccess = res; r.onerror = rej; });
-      success++;
-    } catch (e) { console.error('Sync failed', item.id, e); }
-  }
-  updateQueueBadge();
-  showStatus('✅ Synced ' + success + '/' + items.length + ' scans', 'success');
-}
-
-window.addEventListener('online', () => { updateQueueBadge().then(() => syncQueue()); });
-
-// ── DOM ──
 const video = document.getElementById('video');
 const preview = document.getElementById('preview');
 const canvas = document.getElementById('canvas');
@@ -323,55 +197,94 @@ const progressPct = document.getElementById('progressPct');
 const result = document.getElementById('result');
 const extractedText = document.getElementById('extractedText');
 const status = document.getElementById('status');
-const rotateHint = document.getElementById('rotateHint');
 
-let stream = null, currentImage = null, rotation = 0;
+let stream = null, rotation = 0;
+
+function toggle(id, show) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = show ? 'flex' : 'none';
+}
+
+function showStatus(msg, type) {
+  status.innerHTML = msg;
+  status.className = 'status ' + type;
+  status.style.display = 'block';
+}
+
+function hideStatus() {
+  status.className = 'status';
+  status.style.display = 'none';
+}
 
 // ── Camera ──
 async function startCamera() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 } } });
-    video.srcObject = stream; video.style.display = 'block';
-    dropZone.style.display = 'none'; preview.style.display = 'none';
-    toggleBtn('btnCamera', false); toggleBtn('btnCapture', true); toggleBtn('btnGallery', false);
-    toggleBtn('btnRotate', false); toggleBtn('btnScan', false);
-    scanner.classList.add('active'); rotateHint.classList.remove('show');
-    if (navigator.vibrate) navigator.vibrate(50);
-  } catch (err) { showStatus('❌ Camera access denied. Use Gallery.', 'error'); }
+    video.srcObject = stream;
+    video.style.display = 'block';
+    dropZone.style.display = 'none';
+    preview.style.display = 'none';
+    toggle('btnCamera', false);
+    toggle('btnGallery', false);
+    toggle('btnCapture', true);
+    scanner.classList.add('active');
+  } catch (err) {
+    alert('Camera failed: ' + err.message);
+    showStatus('❌ Camera blocked. Use Gallery.', 'error');
+  }
 }
 
 function capture() {
-  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
   const ctx = canvas.getContext('2d');
-  ctx.translate(canvas.width, 0); ctx.scale(-1, 1); ctx.drawImage(video, 0, 0);
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0);
   stopCamera();
-  rotation = 0; showImage(); toggleBtn('btnScan', true); toggleBtn('btnRotate', true);
+  showImage();
+  toggle('btnScan', true);
+  toggle('btnRotate', true);
 }
 
 function stopCamera() {
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
   video.style.display = 'none';
-  toggleBtn('btnCapture', false); toggleBtn('btnRetake', true);
+  toggle('btnCapture', false);
+  toggle('btnRetake', true);
   scanner.classList.remove('active');
 }
 
 // ── Gallery ──
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.background = '#334155'; });
-dropZone.addEventListener('dragleave', () => { dropZone.style.background = ''; });
-dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.background = ''; if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
-fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+fileInput.addEventListener('change', e => {
+  if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+});
 
 function handleFile(file) {
-  if (!file.type.startsWith('image/')) { showStatus('Please select an image', 'error'); return; }
+  if (!file.type.startsWith('image/')) {
+    showStatus('Please select an image', 'error');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = e => {
     const img = new Image();
     img.onload = () => {
-      canvas.width = img.width; canvas.height = img.height;
+      canvas.width = img.width;
+      canvas.height = img.height;
       canvas.getContext('2d').drawImage(img, 0, 0);
-      rotation = 0; showImage(); toggleBtn('btnScan', true); toggleBtn('btnRotate', true); toggleBtn('btnRetake', true); toggleBtn('btnGallery', false); toggleBtn('btnCamera', false);
+      rotation = 0;
+      showImage();
+      toggle('btnCamera', false);
+      toggle('btnGallery', false);
+      toggle('btnRetake', true);
+      toggle('btnScan', true);
+      toggle('btnRotate', true);
     };
+    img.onerror = () => alert('Failed to load image');
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
@@ -379,71 +292,78 @@ function handleFile(file) {
 
 function showImage() {
   preview.src = canvas.toDataURL('image/jpeg', 0.92);
-  preview.style.display = 'block'; dropZone.style.display = 'none';
+  preview.style.display = 'block';
+  dropZone.style.display = 'none';
 }
 
 function rotateImage() {
   rotation = (rotation + 90) % 360;
-  const w = canvas.width, h = canvas.height;
+  const w = canvas.width;
+  const h = canvas.height;
   procCanvas.width = (rotation % 180 === 0) ? w : h;
   procCanvas.height = (rotation % 180 === 0) ? h : w;
   const ctx = procCanvas.getContext('2d');
-  ctx.translate(procCanvas.width/2, procCanvas.height/2);
+  ctx.translate(procCanvas.width / 2, procCanvas.height / 2);
   ctx.rotate(rotation * Math.PI / 180);
-  ctx.drawImage(canvas, -w/2, -h/2);
-  // Swap reference
-  const temp = document.createElement('canvas');
-  temp.width = procCanvas.width; temp.height = procCanvas.height;
-  temp.getContext('2d').drawImage(procCanvas, 0, 0);
-  canvas.width = temp.width; canvas.height = temp.height;
-  canvas.getContext('2d').drawImage(temp, 0, 0);
+  ctx.drawImage(canvas, -w / 2, -h / 2);
+  // Copy back to main canvas
+  canvas.width = procCanvas.width;
+  canvas.height = procCanvas.height;
+  canvas.getContext('2d').drawImage(procCanvas, 0, 0);
   preview.src = canvas.toDataURL('image/jpeg', 0.92);
-  if (navigator.vibrate) navigator.vibrate(30);
 }
 
 function retake() {
-  preview.style.display = 'none'; result.classList.remove('show'); rotateHint.classList.remove('show');
+  preview.style.display = 'none';
+  result.classList.remove('show');
   dropZone.style.display = 'flex';
-  toggleBtn('btnCamera', true); toggleBtn('btnRetake', false); toggleBtn('btnGallery', true);
-  toggleBtn('btnRotate', false); toggleBtn('btnScan', false);
-  hideStatus(); progressBox.classList.remove('show'); currentImage = null; rotation = 0;
+  toggle('btnCamera', true);
+  toggle('btnGallery', true);
+  toggle('btnRetake', false);
+  toggle('btnScan', false);
+  toggle('btnRotate', false);
+  hideStatus();
+  progressBox.classList.remove('show');
+  rotation = 0;
 }
 
-// ── Image Preprocessing for better OCR ──
-function preprocessImage(sourceCanvas) {
-  const w = sourceCanvas.width, h = sourceCanvas.height;
-  procCanvas.width = w; procCanvas.height = h;
-  const src = sourceCanvas.getContext('2d').getImageData(0, 0, w, h);
+// ── Preprocessing ──
+function preprocess() {
+  const w = canvas.width;
+  const h = canvas.height;
+  procCanvas.width = w;
+  procCanvas.height = h;
+  const src = canvas.getContext('2d').getImageData(0, 0, w, h);
   const dst = procCanvas.getContext('2d').createImageData(w, h);
-  const data = src.data, out = dst.data;
-
-  // Convert to grayscale + increase contrast
+  const data = src.data;
+  const out = dst.data;
   for (let i = 0; i < data.length; i += 4) {
-    const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-    // Contrast boost
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
     const contrast = (gray - 128) * 1.5 + 128;
     const val = contrast < 0 ? 0 : contrast > 255 ? 255 : contrast;
-    out[i] = out[i+1] = out[i+2] = val;
-    out[i+3] = 255;
+    out[i] = out[i + 1] = out[i + 2] = val;
+    out[i + 3] = 255;
   }
-
   procCanvas.getContext('2d').putImageData(dst, 0, 0);
   return procCanvas;
 }
 
 // ── OCR ──
 async function runOCR() {
-  if (!canvas.width) return;
   const scriptUrl = document.getElementById('scriptUrl').value.trim();
-  if (!scriptUrl) { showStatus('⚠️ Paste your Apps Script URL first', 'error'); return; }
+  if (!scriptUrl) {
+    alert('Please paste your Google Apps Script URL first');
+    return;
+  }
 
   progressBox.classList.add('show');
-  toggleBtn('btnRetake', false); toggleBtn('btnRotate', false); toggleBtn('btnScan', false);
-  hideStatus(); rotateHint.classList.remove('show');
+  toggle('btnRetake', false);
+  toggle('btnRotate', false);
+  toggle('btnScan', false);
+  hideStatus();
 
   try {
-    // Preprocess: grayscale + contrast boost
-    const processed = preprocessImage(canvas);
+    const processed = preprocess();
 
     const { data: { text } } = await Tesseract.recognize(
       processed,
@@ -452,7 +372,8 @@ async function runOCR() {
         logger: m => {
           if (m.status === 'recognizing text') {
             const p = Math.round(m.progress * 100);
-            progressFill.style.width = p + '%'; progressPct.textContent = p + '%';
+            progressFill.style.width = p + '%';
+            progressPct.textContent = p + '%';
             progressText.textContent = 'Reading text...';
           } else {
             progressText.textContent = m.status;
@@ -462,58 +383,37 @@ async function runOCR() {
     );
 
     progressBox.classList.remove('show');
-    extractedText.textContent = text; result.classList.add('show');
+    extractedText.textContent = text;
+    result.classList.add('show');
 
     if (text.trim().length < 5) {
-      rotateHint.classList.add('show');
       showStatus('⚠️ Very little text found. Try rotating the image.', 'error');
-      toggleBtn('btnRetake', true); toggleBtn('btnRotate', true); toggleBtn('btnScan', true);
+      toggle('btnRetake', true);
+      toggle('btnRotate', true);
+      toggle('btnScan', true);
       return;
     }
 
-    if (navigator.vibrate) navigator.vibrate([50, 50, 50]);
-    await saveToSheets(text, scriptUrl);
+    // Save
+    showStatus('<span class="spinner"></span>Saving...', 'loading');
+    const params = new URLSearchParams();
+    params.append('text', text);
+    params.append('date', new Date().toLocaleString());
 
-  } catch (err) {
-    progressBox.classList.remove('show');
-    showStatus('❌ OCR failed: ' + err.message, 'error');
-    toggleBtn('btnRetake', true); toggleBtn('btnRotate', true); toggleBtn('btnScan', true);
-  }
-}
-
-// ── Save / Sync ──
-async function saveToSheets(text, url) {
-  showStatus('<span class="spinner"></span>Saving to Google Sheets...', 'loading');
-  try {
-    await sendToScript(text, url);
-    showStatus('✅ Saved to Google Sheets!', 'success');
-    if (navigator.vibrate) navigator.vibrate(100);
-  } catch (err) {
-    if (!navigator.onLine) { await queueScan(text); }
-    else {
-      showStatus('❌ Save failed: ' + err.message + '. Tap Scan to retry.', 'error');
-      toggleBtn('btnRetake', true); toggleBtn('btnRotate', true); toggleBtn('btnScan', true);
-    }
-  }
-}
-
-function sendToScript(text, url) {
-  const params = new URLSearchParams();
-  params.append('text', text);
-  params.append('date', new Date().toLocaleString());
-  return fetch(url, { method: 'POST', body: params }).then(async res => {
+    const res = await fetch(scriptUrl, { method: 'POST', body: params });
     const data = await res.json();
     if (!data.success) throw new Error(data.message || 'Save failed');
-    return data;
-  });
+
+    showStatus('✅ Saved to Google Sheets!', 'success');
+  } catch (err) {
+    progressBox.classList.remove('show');
+    alert('Error: ' + err.message);
+    showStatus('❌ ' + err.message, 'error');
+    toggle('btnRetake', true);
+    toggle('btnRotate', true);
+    toggle('btnScan', true);
+  }
 }
-
-// ── UI Helpers ──
-function toggleBtn(id, show) { const el = document.getElementById(id); if (el) el.style.display = show ? 'flex' : 'none'; }
-function showStatus(msg, type) { status.innerHTML = msg; status.className = 'status ' + type; }
-function hideStatus() { status.className = 'status'; status.style.display = 'none'; }
-
-updateQueueBadge();
 </script>
 
 </body>

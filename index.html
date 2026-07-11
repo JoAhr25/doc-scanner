@@ -126,8 +126,8 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
 
 <div id="app">
   <header>
-    <h1>📄 Doc Scanner v2.0</h1>
-    <p>OCR → Google Sheets</p>
+    <h1>📄 Doc Scanner v3</h1>
+    <p>High-accuracy OCR → Google Sheets</p>
   </header>
 
   <main>
@@ -198,7 +198,7 @@ const result = document.getElementById('result');
 const extractedText = document.getElementById('extractedText');
 const status = document.getElementById('status');
 
-let stream = null, rotation = 0;
+let stream = null, rotation = 0, worker = null;
 
 function toggle(id, show) {
   const el = document.getElementById(id);
@@ -306,7 +306,6 @@ function rotateImage() {
   ctx.translate(procCanvas.width / 2, procCanvas.height / 2);
   ctx.rotate(rotation * Math.PI / 180);
   ctx.drawImage(canvas, -w / 2, -h / 2);
-  // Copy back to main canvas
   canvas.width = procCanvas.width;
   canvas.height = procCanvas.height;
   canvas.getContext('2d').drawImage(procCanvas, 0, 0);
@@ -327,28 +326,99 @@ function retake() {
   rotation = 0;
 }
 
-// ── Preprocessing ──
+// ── Otsu Binarization Preprocessing ──
 function preprocess() {
-  const w = canvas.width;
-  const h = canvas.height;
+  const MAX_DIM = 1500;
+  let w = canvas.width;
+  let h = canvas.height;
+
+  // Resize if too large (Tesseract is slower and less accurate on huge images)
+  if (w > MAX_DIM || h > MAX_DIM) {
+    const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
+    w = Math.floor(w * ratio);
+    h = Math.floor(h * ratio);
+  }
+
   procCanvas.width = w;
   procCanvas.height = h;
-  const src = canvas.getContext('2d').getImageData(0, 0, w, h);
-  const dst = procCanvas.getContext('2d').createImageData(w, h);
-  const data = src.data;
-  const out = dst.data;
-  for (let i = 0; i < data.length; i += 4) {
-    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    const contrast = (gray - 128) * 1.5 + 128;
-    const val = contrast < 0 ? 0 : contrast > 255 ? 255 : contrast;
-    out[i] = out[i + 1] = out[i + 2] = val;
-    out[i + 3] = 255;
+  const ctx = procCanvas.getContext('2d');
+  ctx.drawImage(canvas, 0, 0, w, h);
+
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+  const pixels = w * h;
+  const gray = new Uint8Array(pixels);
+  const hist = new Uint32Array(256);
+
+  // Grayscale + histogram
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    const g = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+    gray[j] = g;
+    hist[Math.floor(g)]++;
   }
-  procCanvas.getContext('2d').putImageData(dst, 0, 0);
+
+  // Otsu's threshold
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+
+  let sumB = 0, wB = 0, max = 0, threshold = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i];
+    if (wB === 0) continue;
+    const wF = pixels - wB;
+    if (wF === 0) break;
+    sumB += i * hist[i];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > max) {
+      max = between;
+      threshold = i;
+    }
+  }
+
+  // Bias slightly darker to preserve thin text strokes
+  const t = threshold * 0.9;
+
+  // Apply pure black & white
+  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+    const val = gray[j] < t ? 0 : 255;
+    data[i] = data[i+1] = data[i+2] = val;
+    data[i+3] = 255;
+  }
+
+  ctx.putImageData(imgData, 0, 0);
   return procCanvas;
 }
 
-// ── OCR ──
+// ── OCR with LSTM Engine + Uniform Block Mode ──
+async function initWorker() {
+  if (worker) return worker;
+
+  progressText.textContent = 'Loading OCR model (one-time, ~10MB)...';
+
+  worker = await Tesseract.createWorker('eng', 1, {
+    logger: m => {
+      if (m.status === 'recognizing text') {
+        const p = Math.round(m.progress * 100);
+        progressFill.style.width = p + '%';
+        progressPct.textContent = p + '%';
+        progressText.textContent = 'Reading text...';
+      } else {
+        progressText.textContent = m.status;
+      }
+    },
+    errorHandler: err => console.error('Tesseract error:', err)
+  });
+
+  // PSM 6 = Assume a single uniform block of text (best for documents)
+  await worker.setParameters({
+    tessedit_pageseg_mode: '6',
+  });
+
+  return worker;
+}
+
 async function runOCR() {
   const scriptUrl = document.getElementById('scriptUrl').value.trim();
   if (!scriptUrl) {
@@ -364,37 +434,23 @@ async function runOCR() {
 
   try {
     const processed = preprocess();
+    const w = await initWorker();
 
-    const { data: { text } } = await Tesseract.recognize(
-      processed,
-      'eng',
-      {
-        logger: m => {
-          if (m.status === 'recognizing text') {
-            const p = Math.round(m.progress * 100);
-            progressFill.style.width = p + '%';
-            progressPct.textContent = p + '%';
-            progressText.textContent = 'Reading text...';
-          } else {
-            progressText.textContent = m.status;
-          }
-        }
-      }
-    );
+    const result = await w.recognize(processed);
+    const text = result.data.text;
 
     progressBox.classList.remove('show');
     extractedText.textContent = text;
     result.classList.add('show');
 
     if (text.trim().length < 5) {
-      showStatus('⚠️ Very little text found. Try rotating the image.', 'error');
+      showStatus('⚠️ Very little text found. Try rotating or retaking.', 'error');
       toggle('btnRetake', true);
       toggle('btnRotate', true);
       toggle('btnScan', true);
       return;
     }
 
-    // Save
     showStatus('<span class="spinner"></span>Saving...', 'loading');
     const params = new URLSearchParams();
     params.append('text', text);

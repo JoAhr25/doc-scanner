@@ -130,4 +130,564 @@ main::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
 }
 .debug-box.show { display: block; }
 .debug-box h3 { font-size: 0.8rem; color: #f59e0b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-.debug-box img
+.debug-box img { width: 100%; border-radius: 8px; background: #0f172a; }
+
+.resultBox {
+  background: #1e293b; border-radius: 12px;
+  padding: 1rem; border: 1px solid #334155;
+  margin-bottom: 0.75rem; display: none;
+}
+.resultBox.show { display: block; }
+.resultBox h3 { font-size: 0.8rem; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.resultBox pre {
+  background: #0f172a; padding: 10px; border-radius: 8px;
+  font-size: 0.8rem; color: #94a3b8; overflow-x: auto;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 180px; overflow-y: auto; line-height: 1.5;
+}
+
+.status {
+  padding: 12px; border-radius: 10px;
+  font-size: 0.85rem; text-align: center;
+  margin-bottom: 0.75rem; display: none;
+}
+.status.success { background: #064e3b; color: #6ee7b7; display: block; }
+.status.error { background: #450a0a; color: #fca5a5; display: block; }
+.status.loading { background: #1e3a5f; color: #93c5fd; display: block; }
+
+.spinner {
+  display: inline-block; width: 16px; height: 16px;
+  border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; animation: spin 1s linear infinite;
+  margin-right: 6px; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#canvas, #procCanvas, #tempCanvas { display: none; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <h1>📄 Doc Scanner v6</h1>
+    <p>Auto-Categorized → Google Sheets</p>
+  </header>
+
+  <main>
+    <div class="config">
+      <label>Google Apps Script URL</label>
+      <input type="text" id="scriptUrl" placeholder="Paste your deployed Apps Script URL">
+      <div class="hint">Scans are auto-sorted into: INVOICE, RECEIPT, RESUME, CONTRACT, MEDICAL, GENERAL</div>
+    </div>
+
+    <div class="scanner" id="scanner">
+      <video id="video" autoplay playsinline></video>
+      <img id="preview" alt="Preview">
+      <div class="drop-zone" id="dropZone">
+        <div class="icon">📁</div>
+        <p>Tap to choose image</p>
+        <div class="hint">or use camera below</div>
+        <input type="file" id="fileInput" accept="image/*">
+      </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+    <canvas id="procCanvas"></canvas>
+    <canvas id="tempCanvas"></canvas>
+
+    <div class="controls" id="controls">
+      <button class="btn btn-primary" id="btnCamera" onclick="startCamera()" style="grid-column: 1 / -1;">📷 Open Camera</button>
+      <button class="btn btn-primary" id="btnCapture" onclick="capture()" style="display:none; grid-column: 1 / -1;">⚡ Capture</button>
+      <button class="btn btn-secondary" id="btnRetake" onclick="retake()" style="display:none;">🔄 Retake</button>
+      <button class="btn btn-secondary" id="btnGallery" onclick="document.getElementById('fileInput').click()">🖼 Gallery</button>
+      <button class="btn btn-warn" id="btnRotate" onclick="rotateImage()" style="display:none;">↻ Rotate</button>
+      <button class="btn btn-accent" id="btnScan" onclick="runOCR()" style="display:none;">🔍 Scan Text</button>
+    </div>
+
+    <div class="progress-box" id="progressBox">
+      <div style="font-weight:600; font-size:0.9rem;">Reading document...</div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-meta">
+        <span id="progressText">Initializing...</span>
+        <span id="progressPct">0%</span>
+      </div>
+    </div>
+
+    <div class="category-badge" id="categoryBadge"></div>
+
+    <div class="debug-box" id="debugBox">
+      <h3>🔍 Preprocessed Image (what OCR sees)</h3>
+      <img id="debugImg" alt="Preprocessed">
+      <div class="hint" style="margin-top:6px;">If this looks bad, retake the photo with better lighting.</div>
+    </div>
+
+    <div class="resultBox" id="resultBox">
+      <h3>Extracted Text</h3>
+      <pre id="extractedText"></pre>
+    </div>
+
+    <div class="status" id="status"></div>
+  </main>
+</div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    for (let reg of regs) reg.unregister();
+  }).catch(() => {}).then(() => {
+    navigator.serviceWorker.register('service-worker.js').catch(err => console.error('SW error:', err));
+  });
+}
+
+const video = document.getElementById('video');
+const preview = document.getElementById('preview');
+const canvas = document.getElementById('canvas');
+const procCanvas = document.getElementById('procCanvas');
+const tempCanvas = document.getElementById('tempCanvas');
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const scanner = document.getElementById('scanner');
+const progressBox = document.getElementById('progressBox');
+const progressFill = document.getElementById('progressFill');
+const progressText = document.getElementById('progressText');
+const progressPct = document.getElementById('progressPct');
+const resultBox = document.getElementById('resultBox');
+const extractedText = document.getElementById('extractedText');
+const status = document.getElementById('status');
+const debugBox = document.getElementById('debugBox');
+const debugImg = document.getElementById('debugImg');
+const categoryBadge = document.getElementById('categoryBadge');
+
+let stream = null, rotation = 0, worker = null;
+
+function toggle(id, show) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = show ? 'flex' : 'none';
+}
+
+function showStatus(msg, type) {
+  status.innerHTML = msg;
+  status.className = 'status ' + type;
+  status.style.display = 'block';
+}
+
+function hideStatus() {
+  status.className = 'status';
+  status.style.display = 'none';
+}
+
+function showCategory(cat) {
+  categoryBadge.textContent = '📂 ' + cat;
+  categoryBadge.className = 'category-badge show cat-' + cat.toLowerCase();
+}
+
+function hideCategory() {
+  categoryBadge.className = 'category-badge';
+  categoryBadge.style.display = 'none';
+}
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 } } });
+    video.srcObject = stream;
+    video.style.display = 'block';
+    dropZone.style.display = 'none';
+    preview.style.display = 'none';
+    toggle('btnCamera', false);
+    toggle('btnGallery', false);
+    toggle('btnCapture', true);
+    scanner.classList.add('active');
+  } catch (err) {
+    alert('Camera failed: ' + err.message);
+    showStatus('❌ Camera blocked. Use Gallery.', 'error');
+  }
+}
+
+function capture() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0);
+  stopCamera();
+  showImage();
+  toggle('btnScan', true);
+  toggle('btnRotate', true);
+}
+
+function stopCamera() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  video.style.display = 'none';
+  toggle('btnCapture', false);
+  toggle('btnRetake', true);
+  scanner.classList.remove('active');
+}
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => {
+  if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  if (!file.type.startsWith('image/')) {
+    showStatus('Please select an image', 'error');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      rotation = 0;
+      showImage();
+      toggle('btnCamera', false);
+      toggle('btnGallery', false);
+      toggle('btnRetake', true);
+      toggle('btnScan', true);
+      toggle('btnRotate', true);
+    };
+    img.onerror = () => alert('Failed to load image');
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function showImage() {
+  preview.src = canvas.toDataURL('image/jpeg', 0.92);
+  preview.style.display = 'block';
+  dropZone.style.display = 'none';
+}
+
+function rotateImage() {
+  rotation = (rotation + 90) % 360;
+  const w = canvas.width;
+  const h = canvas.height;
+  procCanvas.width = (rotation % 180 === 0) ? w : h;
+  procCanvas.height = (rotation % 180 === 0) ? h : w;
+  const ctx = procCanvas.getContext('2d');
+  ctx.translate(procCanvas.width / 2, procCanvas.height / 2);
+  ctx.rotate(rotation * Math.PI / 180);
+  ctx.drawImage(canvas, -w / 2, -h / 2);
+  canvas.width = procCanvas.width;
+  canvas.height = procCanvas.height;
+  canvas.getContext('2d').drawImage(procCanvas, 0, 0);
+  preview.src = canvas.toDataURL('image/jpeg', 0.92);
+}
+
+function retake() {
+  preview.style.display = 'none';
+  resultBox.classList.remove('show');
+  debugBox.classList.remove('show');
+  hideCategory();
+  dropZone.style.display = 'flex';
+  toggle('btnCamera', true);
+  toggle('btnGallery', true);
+  toggle('btnRetake', false);
+  toggle('btnScan', false);
+  toggle('btnRotate', false);
+  hideStatus();
+  progressBox.classList.remove('show');
+  rotation = 0;
+}
+
+function getImageData(c) {
+  return c.getContext('2d').getImageData(0, 0, c.width, c.height);
+}
+
+function putImageData(c, d) {
+  c.getContext('2d').putImageData(d, 0, 0);
+}
+
+function resizeToOptimal() {
+  const MAX = 1500;
+  let w = canvas.width, h = canvas.height;
+  if (w > MAX || h > MAX) {
+    const ratio = Math.min(MAX / w, MAX / h);
+    w = Math.floor(w * ratio);
+    h = Math.floor(h * ratio);
+  }
+  procCanvas.width = w;
+  procCanvas.height = h;
+  procCanvas.getContext('2d').drawImage(canvas, 0, 0, w, h);
+  return { w, h };
+}
+
+function toGrayscale(imgData) {
+  const d = imgData.data;
+  const gray = new Float32Array(d.length / 4);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    gray[j] = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+  }
+  return gray;
+}
+
+function medianFilter(gray, w, h) {
+  const out = new Float32Array(gray.length);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x;
+      const vals = [
+        gray[idx - w - 1], gray[idx - w], gray[idx - w + 1],
+        gray[idx - 1], gray[idx], gray[idx + 1],
+        gray[idx + w - 1], gray[idx + w], gray[idx + w + 1]
+      ];
+      vals.sort((a, b) => a - b);
+      out[idx] = vals[4];
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (x === 0 || x === w - 1 || y === 0 || y === h - 1) {
+        out[y * w + x] = gray[y * w + x];
+      }
+    }
+  }
+  return out;
+}
+
+function unsharpMask(gray, w, h) {
+  const blurred = medianFilter(gray, w, h);
+  const out = new Float32Array(gray.length);
+  for (let i = 0; i < gray.length; i++) {
+    out[i] = gray[i] + 1.5 * (gray[i] - blurred[i]);
+    if (out[i] < 0) out[i] = 0;
+    if (out[i] > 255) out[i] = 255;
+  }
+  return out;
+}
+
+function sauvolaThreshold(gray, w, h) {
+  const out = new Uint8Array(gray.length);
+  const windowSize = 25;
+  const half = Math.floor(windowSize / 2);
+  const k = 0.2;
+  const R = 128;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0, sumSq = 0, count = 0;
+      const yStart = Math.max(0, y - half);
+      const yEnd = Math.min(h, y + half + 1);
+      const xStart = Math.max(0, x - half);
+      const xEnd = Math.min(w, x + half + 1);
+
+      for (let yy = yStart; yy < yEnd; yy++) {
+        for (let xx = xStart; xx < xEnd; xx++) {
+          const v = gray[yy * w + xx];
+          sum += v;
+          sumSq += v * v;
+          count++;
+        }
+      }
+
+      const mean = sum / count;
+      const variance = (sumSq / count) - (mean * mean);
+      const std = Math.sqrt(variance);
+      const threshold = mean * (1 + k * ((std / R) - 1));
+
+      out[y * w + x] = gray[y * w + x] < threshold ? 0 : 255;
+    }
+  }
+  return out;
+}
+
+function autoDeskew(gray, w, h) {
+  const angles = [-5, -2.5, 0, 2.5, 5];
+  let bestAngle = 0, bestScore = -1;
+
+  tempCanvas.width = w;
+  tempCanvas.height = h;
+
+  for (const angle of angles) {
+    const rad = angle * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const newW = Math.abs(w * cos) + Math.abs(h * sin);
+    const newH = Math.abs(w * sin) + Math.abs(h * cos);
+
+    tempCanvas.width = newW;
+    tempCanvas.height = newH;
+    const ctx = tempCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, newW, newH);
+    ctx.translate(newW / 2, newH / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(procCanvas, -w / 2, -h / 2);
+
+    const imgData = ctx.getImageData(0, 0, newW, newH);
+    const d = imgData.data;
+    const g = new Uint8Array(newW * newH);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      g[j] = d[i];
+    }
+
+    let score = 0;
+    for (let y = 0; y < newH; y++) {
+      let rowSum = 0;
+      for (let x = 0; x < newW; x++) {
+        rowSum += g[y * newW + x] < 128 ? 1 : 0;
+      }
+      score += rowSum * rowSum;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestAngle = angle;
+    }
+  }
+
+  if (bestAngle !== 0) {
+    const rad = bestAngle * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const newW = Math.abs(w * cos) + Math.abs(h * sin);
+    const newH = Math.abs(w * sin) + Math.abs(h * cos);
+
+    tempCanvas.width = newW;
+    tempCanvas.height = newH;
+    const ctx = tempCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, newW, newH);
+    ctx.translate(newW / 2, newH / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(procCanvas, -w / 2, -h / 2);
+
+    procCanvas.width = newW;
+    procCanvas.height = newH;
+    procCanvas.getContext('2d').drawImage(tempCanvas, 0, 0);
+    return { w: newW, h: newH };
+  }
+  return { w, h };
+}
+
+function preprocess() {
+  let { w, h } = resizeToOptimal();
+  let imgData = getImageData(procCanvas);
+  let gray = toGrayscale(imgData);
+  gray = unsharpMask(gray, w, h);
+
+  const d = imgData.data;
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    d[i] = d[i+1] = d[i+2] = gray[j];
+    d[i+3] = 255;
+  }
+  putImageData(procCanvas, imgData);
+
+  const deskewed = autoDeskew(gray, w, h);
+  w = deskewed.w;
+  h = deskewed.h;
+
+  imgData = getImageData(procCanvas);
+  gray = toGrayscale(imgData);
+
+  const binary = sauvolaThreshold(gray, w, h);
+
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    const v = binary[j];
+    d[i] = d[i+1] = d[i+2] = v;
+    d[i+3] = 255;
+  }
+  putImageData(procCanvas, imgData);
+
+  return procCanvas;
+}
+
+async function initWorker() {
+  if (worker) return worker;
+
+  progressText.textContent = 'Loading OCR model (one-time, ~10MB)...';
+
+  worker = await Tesseract.createWorker('eng', 1, {
+    logger: m => {
+      if (m.status === 'recognizing text') {
+        const p = Math.round(m.progress * 100);
+        progressFill.style.width = p + '%';
+        progressPct.textContent = p + '%';
+        progressText.textContent = 'Reading text...';
+      } else {
+        progressText.textContent = m.status;
+      }
+    },
+    errorHandler: err => console.error('Tesseract error:', err)
+  });
+
+  await worker.setParameters({
+    tessedit_pageseg_mode: '6',
+  });
+
+  return worker;
+}
+
+async function runOCR() {
+  const scriptUrl = document.getElementById('scriptUrl').value.trim();
+  if (!scriptUrl) {
+    alert('Please paste your Google Apps Script URL first');
+    return;
+  }
+
+  progressBox.classList.add('show');
+  toggle('btnRetake', false);
+  toggle('btnRotate', false);
+  toggle('btnScan', false);
+  hideStatus();
+  hideCategory();
+
+  try {
+    progressText.textContent = 'Preprocessing image...';
+    const processed = preprocess();
+
+    debugImg.src = processed.toDataURL('image/png');
+    debugBox.classList.add('show');
+
+    const w = await initWorker();
+
+    const ocrData = await w.recognize(processed);
+    const text = ocrData.data.text;
+    const confidence = ocrData.data.confidence;
+
+    progressBox.classList.remove('show');
+    extractedText.textContent = text;
+    resultBox.classList.add('show');
+
+    if (text.trim().length < 5) {
+      showStatus('⚠️ Very little text found. Try rotating or retaking.', 'error');
+      toggle('btnRetake', true);
+      toggle('btnRotate', true);
+      toggle('btnScan', true);
+      return;
+    }
+
+    showStatus('<span class="spinner"></span>Saving & categorizing...', 'loading');
+    const params = new URLSearchParams();
+    params.append('text', text);
+    params.append('date', new Date().toLocaleString());
+
+    const fetchRes = await fetch(scriptUrl, { method: 'POST', body: params });
+    const jsonData = await fetchRes.json();
+    if (!jsonData.success) throw new Error(jsonData.message || 'Save failed');
+
+    showCategory(jsonData.category);
+
+    if (confidence >= 60) {
+      showStatus('✅ Saved to ' + jsonData.category + '! Confidence: ' + Math.round(confidence) + '%', 'success');
+    } else {
+      showStatus('✅ Saved to ' + jsonData.category + ' (low confidence: ' + Math.round(confidence) + '%)', 'success');
+    }
+  } catch (err) {
+    progressBox.classList.remove('show');
+    alert('Error: ' + err.message);
+    showStatus('❌ ' + err.message, 'error');
+    toggle('btnRetake', true);
+    toggle('btnRotate', true);
+    toggle('btnScan', true);
+  }
+}
+</script>
+
+</body>
+</html>

@@ -15,9 +15,14 @@ html, body { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #0b0f19; color: #e2e8f0;
-  display: flex; flex-direction: column; overflow: hidden;
+  display: flex; flex-direction: column;
+  overflow: hidden;
 }
-#app { flex: 1; display: flex; flex-direction: column; max-width: 600px; width: 100%; margin: 0 auto; }
+#app {
+  flex: 1; display: flex; flex-direction: column;
+  max-width: 600px; width: 100%; margin: 0 auto;
+  height: 100vh; height: 100dvh;
+}
 header {
   padding: 1rem; text-align: center;
   background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
@@ -26,7 +31,17 @@ header {
 header h1 { font-size: 1.2rem; color: #38bdf8; }
 header p { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
 
-main { flex: 1; overflow-y: auto; padding: 1rem; }
+main {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding: 1rem;
+  min-height: 0;
+}
+main::-webkit-scrollbar { width: 8px; }
+main::-webkit-scrollbar-track { background: #0f172a; border-radius: 4px; }
+main::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
 
 .config {
   background: #1e293b; border-radius: 12px;
@@ -70,6 +85,7 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
   font-size: 0.85rem; font-weight: 600; cursor: pointer;
   transition: all 0.15s; text-align: center;
   display: flex; align-items: center; justify-content: center; gap: 4px;
+  touch-action: manipulation;
 }
 .btn:active { transform: scale(0.96); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -88,14 +104,23 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
 .progress-fill { height: 100%; width: 0%; background: #38bdf8; border-radius: 3px; transition: width 0.3s; }
 .progress-meta { display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.75rem; color: #94a3b8; }
 
-.result {
+.debug-box {
   background: #1e293b; border-radius: 12px;
   padding: 1rem; border: 1px solid #334155;
   margin-bottom: 0.75rem; display: none;
 }
-.result.show { display: block; }
-.result h3 { font-size: 0.8rem; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-.result pre {
+.debug-box.show { display: block; }
+.debug-box h3 { font-size: 0.8rem; color: #f59e0b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.debug-box img { width: 100%; border-radius: 8px; background: #0f172a; }
+
+.resultBox {
+  background: #1e293b; border-radius: 12px;
+  padding: 1rem; border: 1px solid #334155;
+  margin-bottom: 0.75rem; display: none;
+}
+.resultBox.show { display: block; }
+.resultBox h3 { font-size: 0.8rem; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.resultBox pre {
   background: #0f172a; padding: 10px; border-radius: 8px;
   font-size: 0.8rem; color: #94a3b8; overflow-x: auto;
   white-space: pre-wrap; word-break: break-word;
@@ -119,15 +144,15 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-#canvas, #procCanvas { display: none; }
+#canvas, #procCanvas, #tempCanvas { display: none; }
 </style>
 </head>
 <body>
 
 <div id="app">
   <header>
-    <h1>📄 Doc Scanner v4</h1>
-    <p>High-accuracy OCR → Google Sheets</p>
+    <h1>📄 Doc Scanner v5</h1>
+    <p>Robust OCR → Google Sheets</p>
   </header>
 
   <main>
@@ -150,6 +175,7 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
 
     <canvas id="canvas"></canvas>
     <canvas id="procCanvas"></canvas>
+    <canvas id="tempCanvas"></canvas>
 
     <div class="controls" id="controls">
       <button class="btn btn-primary" id="btnCamera" onclick="startCamera()" style="grid-column: 1 / -1;">📷 Open Camera</button>
@@ -169,7 +195,13 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
       </div>
     </div>
 
-    <div class="result" id="resultBox">
+    <div class="debug-box" id="debugBox">
+      <h3>🔍 Preprocessed Image (what OCR sees)</h3>
+      <img id="debugImg" alt="Preprocessed">
+      <div class="hint" style="margin-top:6px;">If this looks bad, retake the photo with better lighting.</div>
+    </div>
+
+    <div class="resultBox" id="resultBox">
       <h3>Extracted Text</h3>
       <pre id="extractedText"></pre>
     </div>
@@ -180,13 +212,21 @@ main { flex: 1; overflow-y: auto; padding: 1rem; }
 
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('service-worker.js').catch(err => alert('SW error: ' + err));
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    for (let reg of regs) {
+      reg.unregister();
+      console.log('Killed old SW');
+    }
+  }).catch(() => {}).then(() => {
+    navigator.serviceWorker.register('service-worker.js').catch(err => console.error('SW error:', err));
+  });
 }
 
 const video = document.getElementById('video');
 const preview = document.getElementById('preview');
 const canvas = document.getElementById('canvas');
 const procCanvas = document.getElementById('procCanvas');
+const tempCanvas = document.getElementById('tempCanvas');
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 const scanner = document.getElementById('scanner');
@@ -197,6 +237,8 @@ const progressPct = document.getElementById('progressPct');
 const resultBox = document.getElementById('resultBox');
 const extractedText = document.getElementById('extractedText');
 const status = document.getElementById('status');
+const debugBox = document.getElementById('debugBox');
+const debugImg = document.getElementById('debugImg');
 
 let stream = null, rotation = 0, worker = null;
 
@@ -216,7 +258,6 @@ function hideStatus() {
   status.style.display = 'none';
 }
 
-// ── Camera ──
 async function startCamera() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 } } });
@@ -258,7 +299,6 @@ function stopCamera() {
   scanner.classList.remove('active');
 }
 
-// ── Gallery ──
 dropZone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => {
   if (e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
@@ -315,6 +355,7 @@ function rotateImage() {
 function retake() {
   preview.style.display = 'none';
   resultBox.classList.remove('show');
+  debugBox.classList.remove('show');
   dropZone.style.display = 'flex';
   toggle('btnCamera', true);
   toggle('btnGallery', true);
@@ -326,67 +367,206 @@ function retake() {
   rotation = 0;
 }
 
-// ── Otsu Binarization ──
-function preprocess() {
-  const MAX_DIM = 1500;
-  let w = canvas.width;
-  let h = canvas.height;
+function getImageData(c) {
+  return c.getContext('2d').getImageData(0, 0, c.width, c.height);
+}
 
-  if (w > MAX_DIM || h > MAX_DIM) {
-    const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
+function putImageData(c, d) {
+  c.getContext('2d').putImageData(d, 0, 0);
+}
+
+function resizeToOptimal() {
+  const MAX = 1500;
+  let w = canvas.width, h = canvas.height;
+  if (w > MAX || h > MAX) {
+    const ratio = Math.min(MAX / w, MAX / h);
     w = Math.floor(w * ratio);
     h = Math.floor(h * ratio);
   }
-
   procCanvas.width = w;
   procCanvas.height = h;
-  const ctx = procCanvas.getContext('2d');
-  ctx.drawImage(canvas, 0, 0, w, h);
+  procCanvas.getContext('2d').drawImage(canvas, 0, 0, w, h);
+  return { w, h };
+}
 
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const data = imgData.data;
-  const pixels = w * h;
-  const gray = new Uint8Array(pixels);
-  const hist = new Uint32Array(256);
-
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    const g = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-    gray[j] = g;
-    hist[Math.floor(g)]++;
+function toGrayscale(imgData) {
+  const d = imgData.data;
+  const gray = new Float32Array(d.length / 4);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    gray[j] = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
   }
+  return gray;
+}
 
-  let sum = 0;
-  for (let i = 0; i < 256; i++) sum += i * hist[i];
+function medianFilter(gray, w, h) {
+  const out = new Float32Array(gray.length);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x;
+      const vals = [
+        gray[idx - w - 1], gray[idx - w], gray[idx - w + 1],
+        gray[idx - 1], gray[idx], gray[idx + 1],
+        gray[idx + w - 1], gray[idx + w], gray[idx + w + 1]
+      ];
+      vals.sort((a, b) => a - b);
+      out[idx] = vals[4];
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (x === 0 || x === w - 1 || y === 0 || y === h - 1) {
+        out[y * w + x] = gray[y * w + x];
+      }
+    }
+  }
+  return out;
+}
 
-  let sumB = 0, wB = 0, max = 0, threshold = 128;
-  for (let i = 0; i < 256; i++) {
-    wB += hist[i];
-    if (wB === 0) continue;
-    const wF = pixels - wB;
-    if (wF === 0) break;
-    sumB += i * hist[i];
-    const mB = sumB / wB;
-    const mF = (sum - sumB) / wF;
-    const between = wB * wF * (mB - mF) * (mB - mF);
-    if (between > max) {
-      max = between;
-      threshold = i;
+function unsharpMask(gray, w, h) {
+  const blurred = medianFilter(gray, w, h);
+  const out = new Float32Array(gray.length);
+  for (let i = 0; i < gray.length; i++) {
+    out[i] = gray[i] + 1.5 * (gray[i] - blurred[i]);
+    if (out[i] < 0) out[i] = 0;
+    if (out[i] > 255) out[i] = 255;
+  }
+  return out;
+}
+
+function sauvolaThreshold(gray, w, h) {
+  const out = new Uint8Array(gray.length);
+  const windowSize = 25;
+  const half = Math.floor(windowSize / 2);
+  const k = 0.2;
+  const R = 128;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0, sumSq = 0, count = 0;
+      const yStart = Math.max(0, y - half);
+      const yEnd = Math.min(h, y + half + 1);
+      const xStart = Math.max(0, x - half);
+      const xEnd = Math.min(w, x + half + 1);
+
+      for (let yy = yStart; yy < yEnd; yy++) {
+        for (let xx = xStart; xx < xEnd; xx++) {
+          const v = gray[yy * w + xx];
+          sum += v;
+          sumSq += v * v;
+          count++;
+        }
+      }
+
+      const mean = sum / count;
+      const variance = (sumSq / count) - (mean * mean);
+      const std = Math.sqrt(variance);
+      const threshold = mean * (1 + k * ((std / R) - 1));
+
+      out[y * w + x] = gray[y * w + x] < threshold ? 0 : 255;
+    }
+  }
+  return out;
+}
+
+function autoDeskew(gray, w, h) {
+  const angles = [-5, -2.5, 0, 2.5, 5];
+  let bestAngle = 0, bestScore = -1;
+
+  tempCanvas.width = w;
+  tempCanvas.height = h;
+
+  for (const angle of angles) {
+    const rad = angle * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const newW = Math.abs(w * cos) + Math.abs(h * sin);
+    const newH = Math.abs(w * sin) + Math.abs(h * cos);
+
+    tempCanvas.width = newW;
+    tempCanvas.height = newH;
+    const ctx = tempCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, newW, newH);
+    ctx.translate(newW / 2, newH / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(procCanvas, -w / 2, -h / 2);
+
+    const imgData = ctx.getImageData(0, 0, newW, newH);
+    const d = imgData.data;
+    const g = new Uint8Array(newW * newH);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+      g[j] = d[i];
+    }
+
+    let score = 0;
+    for (let y = 0; y < newH; y++) {
+      let rowSum = 0;
+      for (let x = 0; x < newW; x++) {
+        rowSum += g[y * newW + x] < 128 ? 1 : 0;
+      }
+      score += rowSum * rowSum;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestAngle = angle;
     }
   }
 
-  const t = threshold * 0.9;
+  if (bestAngle !== 0) {
+    const rad = bestAngle * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const newW = Math.abs(w * cos) + Math.abs(h * sin);
+    const newH = Math.abs(w * sin) + Math.abs(h * cos);
 
-  for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    const val = gray[j] < t ? 0 : 255;
-    data[i] = data[i+1] = data[i+2] = val;
-    data[i+3] = 255;
+    tempCanvas.width = newW;
+    tempCanvas.height = newH;
+    const ctx = tempCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, newW, newH);
+    ctx.translate(newW / 2, newH / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(procCanvas, -w / 2, -h / 2);
+
+    procCanvas.width = newW;
+    procCanvas.height = newH;
+    procCanvas.getContext('2d').drawImage(tempCanvas, 0, 0);
+    return { w: newW, h: newH };
   }
+  return { w, h };
+}
 
-  ctx.putImageData(imgData, 0, 0);
+function preprocess() {
+  let { w, h } = resizeToOptimal();
+  let imgData = getImageData(procCanvas);
+  let gray = toGrayscale(imgData);
+  gray = unsharpMask(gray, w, h);
+
+  const d = imgData.data;
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    d[i] = d[i+1] = d[i+2] = gray[j];
+    d[i+3] = 255;
+  }
+  putImageData(procCanvas, imgData);
+
+  const deskewed = autoDeskew(gray, w, h);
+  w = deskewed.w;
+  h = deskewed.h;
+
+  imgData = getImageData(procCanvas);
+  gray = toGrayscale(imgData);
+
+  const binary = sauvolaThreshold(gray, w, h);
+
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+    const v = binary[j];
+    d[i] = d[i+1] = d[i+2] = v;
+    d[i+3] = 255;
+  }
+  putImageData(procCanvas, imgData);
+
   return procCanvas;
 }
 
-// ── OCR ──
 async function initWorker() {
   if (worker) return worker;
 
@@ -427,22 +607,35 @@ async function runOCR() {
   hideStatus();
 
   try {
+    progressText.textContent = 'Preprocessing image...';
     const processed = preprocess();
+
+    debugImg.src = processed.toDataURL('image/png');
+    debugBox.classList.add('show');
+
     const w = await initWorker();
 
-    const ocrResult = await w.recognize(processed);
-    const text = ocrResult.data.text;
+    const ocrData = await w.recognize(processed);
+    const text = ocrData.data.text;
+    const confidence = ocrData.data.confidence;
 
     progressBox.classList.remove('show');
     extractedText.textContent = text;
     resultBox.classList.add('show');
 
     if (text.trim().length < 5) {
-      showStatus('⚠️ Very little text found. Try rotating or retaking.', 'error');
+      showStatus('⚠️ Very little text found. Try rotating or retaking with better lighting.', 'error');
       toggle('btnRetake', true);
       toggle('btnRotate', true);
       toggle('btnScan', true);
       return;
+    }
+
+    if (confidence < 60) {
+      showStatus('⚠️ Low confidence (' + Math.round(confidence) + '%). Check the preprocessed image above.', 'error');
+      toggle('btnRetake', true);
+      toggle('btnRotate', true);
+      toggle('btnScan', true);
     }
 
     showStatus('<span class="spinner"></span>Saving...', 'loading');
@@ -450,11 +643,15 @@ async function runOCR() {
     params.append('text', text);
     params.append('date', new Date().toLocaleString());
 
-    const res = await fetch(scriptUrl, { method: 'POST', body: params });
-    const data = await res.json();
-    if (!data.success) throw new Error(data.message || 'Save failed');
+    const fetchRes = await fetch(scriptUrl, { method: 'POST', body: params });
+    const jsonData = await fetchRes.json();
+    if (!jsonData.success) throw new Error(jsonData.message || 'Save failed');
 
-    showStatus('✅ Saved to Google Sheets!', 'success');
+    if (confidence >= 60) {
+      showStatus('✅ Saved! Confidence: ' + Math.round(confidence) + '%', 'success');
+    } else {
+      showStatus('✅ Saved but confidence was low (' + Math.round(confidence) + '%). Review the text above.', 'success');
+    }
   } catch (err) {
     progressBox.classList.remove('show');
     alert('Error: ' + err.message);

@@ -8,9 +8,20 @@ const APP_SHELL = [
   'https://unpkg.com/tesseract.js@5.0.4/dist/tesseract.min.js'
 ];
 
+// DELETE ALL OLD CACHES FIRST
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).catch(console.error)
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((name) => {
+          if (name !== CACHE_NAME) {
+            return caches.delete(name);
+          }
+        })
+      );
+    }).then(() => {
+      return caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL));
+    })
   );
   self.skipWaiting();
 });
@@ -21,18 +32,13 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
-
-  // Always fetch live for Google Apps Script (don't cache responses)
   if (url.includes('script.google.com')) {
     event.respondWith(fetch(event.request));
     return;
   }
-
-  // Cache-first for app shell & tesseract assets
   event.respondWith(
     caches.match(event.request).then((response) => {
-      if (response) return response;
-      return fetch(event.request).then((fetchResponse) => {
+      return response || fetch(event.request).then((fetchResponse) => {
         if (event.request.method === 'GET') {
           const clone = fetchResponse.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));

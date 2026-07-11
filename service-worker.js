@@ -1,4 +1,4 @@
-const CACHE_NAME = 'doc-scanner-v2';
+const CACHE_NAME = 'doc-scanner-v4';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,7 +8,6 @@ const APP_SHELL = [
   'https://unpkg.com/tesseract.js@5.0.4/dist/tesseract.min.js'
 ];
 
-// DELETE ALL OLD CACHES FIRST
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {

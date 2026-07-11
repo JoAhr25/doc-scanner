@@ -1,4 +1,4 @@
-const CACHE_NAME = 'doc-scanner-v5';
+const CACHE_NAME = 'doc-scanner-v6';
 const APP_SHELL = [
   './',
   './index.html',
@@ -50,4 +50,3 @@ self.addEventListener('fetch', (event) => {
       });
     })
   );
-});
